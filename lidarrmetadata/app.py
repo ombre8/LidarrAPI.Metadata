@@ -130,21 +130,16 @@ def handle_error(e):
     sentry_sdk.capture_exception(e)
     return jsonify(error='Internal server error'), 500
 
-def validate_mbid(mbid, check_blacklist=True):
+def validate_mbid(mbid):
     """
     Validates Musicbrainz ID and returns flask response in case of error
     :param mbid: Musicbrainz ID to verify
-    :param check_blacklist: Checks blacklist for blacklisted ids. Defaults to True
     :return: Flask response if error, None if valid
     """
     try:
         uuid.UUID(mbid, version=4)
     except ValueError:
         return jsonify(error='Invalid UUID'), 400
-
-    if check_blacklist and mbid in config.get_config().BLACKLISTED_ARTISTS:
-        return jsonify(error='Blacklisted artist'), 403
-
 
 @app.route('/')
 @no_cache
@@ -169,7 +164,7 @@ async def default_route():
 
 @app.route('/artist/<mbid>', methods=['GET'])
 async def get_artist_info_route(mbid):
-    uuid_validation_response = validate_mbid(mbid, True)
+    uuid_validation_response = validate_mbid(mbid)
     if uuid_validation_response:
         return uuid_validation_response
     
@@ -179,8 +174,6 @@ async def get_artist_info_route(mbid):
     artist, expiry = await artist_task
 
     albums = await albums_task
-    if albums is None:
-        return jsonify(error='No release group provider available'), 500
         
     # Filter release group types
     # This will soon happen client side but keep around until api version is bumped for older clients
@@ -360,8 +353,7 @@ async def get_artist_search_results(query, limit):
         return abort(500, 'No search providers available')
 
     # TODO Prefer certain providers?
-    artist_ids = filter(lambda a: a['Id'] not in config.get_config().BLACKLISTED_ARTISTS,
-                        await search_providers[0].search_artist_name(query, limit=limit))
+    artist_ids = await search_providers[0].search_artist_name(query, limit=limit)
 
     async def get_search_result(id, score):
         result, validity = await api.get_artist_info(id)
